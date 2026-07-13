@@ -44,8 +44,72 @@ def _connect():
             expires_at TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS referrals (
+            referred_id INTEGER PRIMARY KEY,
+            referrer_id INTEGER,
+            created_at TEXT,
+            rewarded INTEGER DEFAULT 0
+        )
+    """)
     conn.commit()
     return conn
+
+
+def record_referral(referred_id: int, referrer_id: int):
+    """Запоминает, кто кого пригласил. Срабатывает только один раз на пользователя
+    (первый /start с реферальной ссылкой) и не даёт человеку пригласить самого себя."""
+    if referred_id == referrer_id:
+        return
+    conn = _connect()
+    existing = conn.execute(
+        "SELECT 1 FROM referrals WHERE referred_id = ?", (referred_id,)
+    ).fetchone()
+    if not existing:
+        now = dt.datetime.utcnow().isoformat()
+        conn.execute(
+            "INSERT INTO referrals (referred_id, referrer_id, created_at, rewarded) VALUES (?, ?, ?, 0)",
+            (referred_id, referrer_id, now),
+        )
+        conn.commit()
+    conn.close()
+
+
+def reward_referrer_if_needed(referred_id: int, bonus_days: int) -> int | None:
+    """
+    Вызывать при первой успешной оплате подписки пользователем.
+    Если пользователь пришёл по реферальной ссылке и награда ещё не выдавалась —
+    продлевает подписку тому, кто его пригласил, на bonus_days.
+    Возвращает referrer_id, если награда выдана, иначе None.
+    """
+    conn = _connect()
+    row = conn.execute(
+        "SELECT referrer_id, rewarded FROM referrals WHERE referred_id = ?", (referred_id,)
+    ).fetchone()
+
+    if not row or row[1]:
+        conn.close()
+        return None
+
+    referrer_id = row[0]
+    conn.execute("UPDATE referrals SET rewarded = 1 WHERE referred_id = ?", (referred_id,))
+    conn.commit()
+    conn.close()
+
+    extend_subscription(referrer_id, bonus_days)
+    return referrer_id
+
+
+def get_referral_stats(user_id: int) -> dict:
+    conn = _connect()
+    total_invited = conn.execute(
+        "SELECT COUNT(*) FROM referrals WHERE referrer_id = ?", (user_id,)
+    ).fetchone()[0]
+    rewarded_count = conn.execute(
+        "SELECT COUNT(*) FROM referrals WHERE referrer_id = ? AND rewarded = 1", (user_id,)
+    ).fetchone()[0]
+    conn.close()
+    return {"total_invited": total_invited, "rewarded_count": rewarded_count}
 
 
 def set_subscription(user_id: int, expires_at: dt.datetime):

@@ -28,7 +28,9 @@ from combo_builder import build_combo
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
 FREE_TRIAL_EXPRESSES = 1
+REFERRAL_BONUS_DAYS = 7
 DEFAULT_HOURS_WINDOW = 24
+BOT_USERNAME = os.environ.get("BOT_USERNAME", "")  # без @, например shapitisto_bot
 
 # Разрешаем запросы с любого источника (GitHub Pages), т.к. это публичный
 # read-mostly API без чувствительных операций, защищённый подписью Telegram.
@@ -107,6 +109,9 @@ async def handle_account(request: web.Request) -> web.Response:
     user_id = user["id"]
     stats.track_user(user_id, user.get("username"))
     info = stats.get_account_info(user_id)
+    ref_stats = stats.get_referral_stats(user_id)
+
+    referral_link = f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}" if BOT_USERNAME else None
 
     return _cors_response({
         "ok": True,
@@ -114,6 +119,10 @@ async def handle_account(request: web.Request) -> web.Response:
         "expires_at": info["expires_at"].isoformat() if info["expires_at"] else None,
         "express_count": info["express_count"],
         "free_trial_remaining": max(0, FREE_TRIAL_EXPRESSES - info["express_count"]),
+        "referral_link": referral_link,
+        "referral_bonus_days": REFERRAL_BONUS_DAYS,
+        "referral_invited": ref_stats["total_invited"],
+        "referral_rewarded": ref_stats["rewarded_count"],
     })
 
 

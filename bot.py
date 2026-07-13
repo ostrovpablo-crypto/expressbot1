@@ -46,6 +46,7 @@ SUBSCRIPTION_DAYS = 30
 SUBSCRIPTION_PRICE = 5      # сумма
 SUBSCRIPTION_ASSET = "USDT"  # валюта: USDT, TON, BTC и т.д. — см. доку Crypto Pay
 FREE_TRIAL_EXPRESSES = 1     # сколько экспрессов доступно без подписки
+REFERRAL_BONUS_DAYS = 7      # сколько дней подписки получает пригласивший, когда приглашённый впервые оплатит
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -78,6 +79,16 @@ def odds_keyboard():
 @dp.message(CommandStart())
 async def start(message: Message, state: FSMContext):
     stats.track_user(message.from_user.id, message.from_user.username)
+
+    # Реферальная ссылка выглядит как /start ref_123456789
+    parts = message.text.split(maxsplit=1)
+    if len(parts) == 2 and parts[1].startswith("ref_"):
+        try:
+            referrer_id = int(parts[1].removeprefix("ref_"))
+            stats.record_referral(message.from_user.id, referrer_id)
+        except ValueError:
+            pass
+
     await state.clear()
     await message.answer(
         "Привет! Я подбираю экспресс под нужный тебе суммарный коэффициент.\n\n"
@@ -133,6 +144,56 @@ async def grant_subscription(message: Message):
             "⚠️ Не удалось отправить уведомление пользователю "
             "(возможно, он ещё не писал боту /start)."
         )
+
+
+_bot_username_cache = None
+
+async def _get_bot_username() -> str:
+    global _bot_username_cache
+    if _bot_username_cache is None:
+        me = await bot.get_me()
+        _bot_username_cache = me.username
+    return _bot_username_cache
+
+
+@dp.callback_query(F.data == "referral:show")
+async def show_referral(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    await callback.answer()
+
+    username = await _get_bot_username()
+    link = f"https://t.me/{username}?start=ref_{user_id}"
+    ref_stats = stats.get_referral_stats(user_id)
+
+    text = (
+        "🔗 Твоя реферальная ссылка:\n\n"
+        f"{link}\n\n"
+        f"Приглашено: {ref_stats['total_invited']}\n"
+        f"Оформили подписку: {ref_stats['rewarded_count']}\n\n"
+        f"За каждого друга, который оформит подписку, тебе начисляется "
+        f"+{REFERRAL_BONUS_DAYS} дней подписки."
+    )
+
+    await callback.message.answer(text, reply_markup=after_express_keyboard())
+
+
+@dp.message(F.text == "/referral")
+async def referral_command(message: Message):
+    user_id = message.from_user.id
+    username = await _get_bot_username()
+    link = f"https://t.me/{username}?start=ref_{user_id}"
+    ref_stats = stats.get_referral_stats(user_id)
+
+    text = (
+        "🔗 Твоя реферальная ссылка:\n\n"
+        f"{link}\n\n"
+        f"Приглашено: {ref_stats['total_invited']}\n"
+        f"Оформили подписку: {ref_stats['rewarded_count']}\n\n"
+        f"За каждого друга, который оформит подписку, тебе начисляется "
+        f"+{REFERRAL_BONUS_DAYS} дней подписки."
+    )
+
+    await message.answer(text, reply_markup=after_express_keyboard())
 
 
 def subscribe_keyboard(pay_url: str, invoice_id: int):
@@ -200,6 +261,17 @@ async def check_payment(callback: CallbackQuery):
     await callback.message.answer(
         f"✅ Оплата получена! Подписка активна до {new_expiry.strftime('%d.%m.%Y %H:%M')} UTC."
     )
+
+    referrer_id = stats.reward_referrer_if_needed(user_id, REFERRAL_BONUS_DAYS)
+    if referrer_id:
+        try:
+            await bot.send_message(
+                referrer_id,
+                f"🎉 Твой друг оформил подписку! Тебе начислено +{REFERRAL_BONUS_DAYS} дней подписки."
+            )
+        except Exception:
+            pass  # реферер мог заблокировать бота — не критично
+
     await callback.answer()
 
 
@@ -208,6 +280,7 @@ def after_express_keyboard():
     kb.button(text="🔄 Новый экспресс", callback_data="restart:new")
     kb.button(text="📜 История экспрессов", callback_data="history:show")
     kb.button(text="👤 Личный кабинет", callback_data="account:show")
+    kb.button(text="🔗 Пригласить друга", callback_data="referral:show")
     kb.button(text="⬅️ В начало", callback_data="restart:start")
     kb.adjust(1)
     return kb.as_markup()
