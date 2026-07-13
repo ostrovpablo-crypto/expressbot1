@@ -188,6 +188,14 @@ def get_all_user_ids() -> list[int]:
     return [r[0] for r in rows]
 
 
+def access_allowed(user_id: int, admin_id: int, free_trial_limit: int) -> bool:
+    if user_id == admin_id:
+        return True
+    if is_subscribed(user_id):
+        return True
+    return count_user_expresses(user_id) < free_trial_limit
+
+
 def count_user_expresses(user_id: int) -> int:
     conn = _connect()
     count = conn.execute(

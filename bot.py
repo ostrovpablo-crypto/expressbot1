@@ -29,6 +29,7 @@ from combo_builder import build_combo
 from express_image import render_express_image
 import stats
 import crypto_pay
+import api_server
 
 logging.basicConfig(level=logging.INFO)
 
@@ -202,14 +203,6 @@ async def check_payment(callback: CallbackQuery):
     await callback.answer()
 
 
-def _access_allowed(user_id: int) -> bool:
-    if user_id == ADMIN_ID:
-        return True
-    if stats.is_subscribed(user_id):
-        return True
-    return stats.count_user_expresses(user_id) < FREE_TRIAL_EXPRESSES
-
-
 def after_express_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Новый экспресс", callback_data="restart:new")
@@ -292,7 +285,7 @@ async def odds_chosen(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.answer()
 
-    if not _access_allowed(callback.from_user.id):
+    if not stats.access_allowed(callback.from_user.id, ADMIN_ID, FREE_TRIAL_EXPRESSES):
         await callback.message.answer(
             "Бесплатная попытка уже использована. Оформи подписку командой /subscribe, "
             "чтобы собирать экспрессы дальше."
@@ -310,7 +303,7 @@ async def custom_odds_entered(message: Message, state: FSMContext):
         return
     await state.clear()
 
-    if not _access_allowed(message.from_user.id):
+    if not stats.access_allowed(message.from_user.id, ADMIN_ID, FREE_TRIAL_EXPRESSES):
         await message.answer(
             "Бесплатная попытка уже использована. Оформи подписку командой /subscribe, "
             "чтобы собирать экспрессы дальше."
@@ -486,7 +479,10 @@ async def show_account(callback: CallbackQuery):
 
 
 async def main():
-    await dp.start_polling(bot)
+    await asyncio.gather(
+        dp.start_polling(bot),
+        api_server.run_webapp_server(),
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())
