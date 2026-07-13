@@ -1,7 +1,7 @@
 // ==== Настройка ====
 // Замени на публичный домен своего бэкенда на Railway, например:
 // const API_BASE = "https://expressbot-production.up.railway.app";
-const API_BASE = "https://ЗАМЕНИ_НА_СВОЙ_RAILWAY_ДОМЕН";
+const API_BASE = "https://expressbot1-production.up.railway.app";
 
 // ==== Telegram WebApp init ====
 const tg = window.Telegram?.WebApp;
