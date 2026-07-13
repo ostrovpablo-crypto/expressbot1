@@ -21,25 +21,39 @@ import random
 from typing import List, Dict, Optional
 
 RELATIVE_TOLERANCE = 0.08   # допустимое отклонение — 8% от цели
-MIN_LEG_ODDS = 1.04          # отсекаем совсем неинтересные исходы
-MAX_LEG_ODDS = 1.3           # отсекаем слишком рискованные исходы
+
+# Диапазон коэффициентов для отдельного события зависит от цели:
+# для больших целевых коэффициентов (x5+) используем более высокий диапазон
+# на ногу — иначе пришлось бы набирать десятки событий подряд.
+LOW_TARGET_MIN_ODDS = 1.04
+LOW_TARGET_MAX_ODDS = 1.3
+HIGH_TARGET_MIN_ODDS = 1.2
+HIGH_TARGET_MAX_ODDS = 1.55
+HIGH_TARGET_THRESHOLD = 5.0   # с какого целевого коэффициента переключаемся на широкий диапазон
+
 ATTEMPTS = 300                # число случайных попыток сборки
 HILL_CLIMB_STEPS = 60         # число шагов локального улучшения на попытку
 
 
-def _favorite_outcome(event: Dict) -> Optional[Dict]:
-    """Исход с наименьшим коэффициентом = фаворит по мнению букмекера."""
-    outcomes = [o for o in event["outcomes"] if MIN_LEG_ODDS <= o["odds"] <= MAX_LEG_ODDS]
+def _odds_range_for_target(target_odds: float):
+    if target_odds >= HIGH_TARGET_THRESHOLD:
+        return HIGH_TARGET_MIN_ODDS, HIGH_TARGET_MAX_ODDS
+    return LOW_TARGET_MIN_ODDS, LOW_TARGET_MAX_ODDS
+
+
+def _favorite_outcome(event: Dict, min_odds: float, max_odds: float) -> Optional[Dict]:
+    """Исход с наименьшим коэффициентом в допустимом диапазоне = фаворит по мнению букмекера."""
+    outcomes = [o for o in event["outcomes"] if min_odds <= o["odds"] <= max_odds]
     if not outcomes:
         return None
     return min(outcomes, key=lambda o: o["odds"])
 
 
-def _dynamic_max_legs(target_odds: float) -> int:
+def _dynamic_max_legs(target_odds: float, min_odds: float) -> int:
     """Сколько событий максимум может понадобиться, чтобы дотянуть до цели."""
     if target_odds <= 1:
         return 1
-    needed = math.log(target_odds) / math.log(MIN_LEG_ODDS)
+    needed = math.log(target_odds) / math.log(min_odds)
     return min(int(needed) + 5, 40)  # разумный потолок, чтобы не собирать абсурдно длинные экспрессы
 
 
@@ -55,9 +69,11 @@ def _relative_diff(total: float, target: float) -> float:
 
 
 def build_combo(events: List[Dict], target_odds: float) -> Optional[List[Dict]]:
+    min_odds, max_odds = _odds_range_for_target(target_odds)
+
     candidates = []
     for event in events:
-        fav = _favorite_outcome(event)
+        fav = _favorite_outcome(event, min_odds, max_odds)
         if fav:
             candidates.append({
                 "match": event["match"],
@@ -70,7 +86,7 @@ def build_combo(events: List[Dict], target_odds: float) -> Optional[List[Dict]]:
     if not candidates:
         return None
 
-    max_legs = _dynamic_max_legs(target_odds)
+    max_legs = _dynamic_max_legs(target_odds, min_odds)
     tolerance = max(RELATIVE_TOLERANCE * target_odds, 0.05)
 
     best_combo = None

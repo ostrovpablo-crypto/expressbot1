@@ -32,10 +32,13 @@ BASE_URL = "https://api.sharpapi.io/api/v1"
 # Букмекеры, выбранные вручную в личном кабинете SharpAPI.
 # Слаги — лучшее предположение по названиям; если какой-то не совпадёт
 # с реальным API, будет видно по ошибке в логах (см. диагностику ниже).
-SPORTSBOOKS = os.environ.get("SHARPAPI_BOOKS", "betway,bwin,betano,bet365us,unibet")
+# На платном тарифе доступны все букмекеры — по умолчанию НЕ ограничиваем
+# список, чтобы получить максимальный охват событий и лиг. Можно всё же
+# сузить через переменную SHARPAPI_BOOKS, если понадобится.
+SPORTSBOOKS = os.environ.get("SHARPAPI_BOOKS", "")
 
 PAGE_LIMIT = 100
-MAX_PAGES = 20   # увеличено — раньше не хватало данных для сборки высоких коэффициентов
+MAX_PAGES = 60   # больше не ограничиваемся узким набором букмекеров — данных будет намного больше
 REQUEST_DELAY_SECONDS = 5.5   # держим темп ниже лимита 12 запросов/минуту
 REQUEST_TIMEOUT = 15
 
@@ -70,14 +73,18 @@ async def _get(session: aiohttp.ClientSession, path: str, params: dict):
 async def _fetch_all_odds_rows(session: aiohttp.ClientSession) -> List[Dict]:
     all_rows = []
     offset = 0
+    total_available = None
 
     for page in range(MAX_PAGES):
-        data = await _get(session, "odds", {
-            "sportsbook": SPORTSBOOKS,
+        params = {
             "live": "false",   # только предматчевые линии
             "limit": PAGE_LIMIT,
             "offset": offset,
-        })
+        }
+        if SPORTSBOOKS:
+            params["sportsbook"] = SPORTSBOOKS
+
+        data = await _get(session, "odds", params)
         if not data:
             break
 
@@ -87,12 +94,17 @@ async def _fetch_all_odds_rows(session: aiohttp.ClientSession) -> List[Dict]:
         meta = data.get("meta", {})
         pagination = meta.get("pagination", {})
         if page == 0:
-            print(f"[sharpapi] всего строк коэффициентов доступно: {meta.get('total')}, "
-                  f"букмекеры запрошены: {SPORTSBOOKS}")
+            total_available = meta.get("total")
+            print(f"[sharpapi] всего строк коэффициентов доступно: {total_available}, "
+                  f"букмекеры: {SPORTSBOOKS or 'все доступные на тарифе'}")
 
         if not pagination.get("has_more"):
             break
         offset = pagination.get("next_offset", offset + PAGE_LIMIT)
+
+        # если знаем общее число строк — не листаем больше, чем нужно
+        if total_available is not None and offset >= total_available:
+            break
 
         await asyncio.sleep(REQUEST_DELAY_SECONDS)
 
