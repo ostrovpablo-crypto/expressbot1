@@ -39,7 +39,7 @@ SPORTSBOOKS = os.environ.get("SHARPAPI_BOOKS", "")
 
 PAGE_LIMIT = 100
 MAX_PAGES = 60   # больше не ограничиваемся узким набором букмекеров — данных будет намного больше
-REQUEST_DELAY_SECONDS = 5.5   # держим темп ниже лимита 12 запросов/минуту
+REQUEST_DELAY_SECONDS = 0.6   # тариф даёт 120 запросов/минуту — держим темп чуть ниже лимита
 REQUEST_TIMEOUT = 15
 
 CACHE_TTL_SECONDS = 300
