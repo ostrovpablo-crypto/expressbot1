@@ -20,6 +20,7 @@ const screens = {
   loading: document.getElementById("screen-loading"),
   result: document.getElementById("screen-result"),
   error: document.getElementById("screen-error"),
+  referral: document.getElementById("screen-referral"),
 };
 
 function showScreen(name) {
@@ -144,6 +145,8 @@ function escapeHtml(str) {
 }
 
 // ==== Загрузка информации об аккаунте на старте ====
+let accountData = null;
+
 async function loadAccount() {
   if (!initData) {
     accountLine.textContent = "Открой мини-приложение из Telegram-бота";
@@ -151,6 +154,8 @@ async function loadAccount() {
   }
   const { status, data } = await apiPost("/api/account", {});
   if (status === 200 && data.ok) {
+    accountData = data;
+
     if (data.subscribed) {
       accountLine.innerHTML = `Подписка активна до <strong>${new Date(data.expires_at).toLocaleDateString("ru-RU")}</strong>`;
     } else if (data.free_trial_remaining > 0) {
@@ -158,8 +163,45 @@ async function loadAccount() {
     } else {
       accountLine.innerHTML = `Оформи подписку через /subscribe в чате с ботом`;
     }
+
+    if (data.referral_link) {
+      referralBtn.hidden = false;
+    }
   }
 }
+
+// ==== Экран "Пригласить друга" ====
+const referralBtn = document.getElementById("referral-btn");
+const referralSubtitle = document.getElementById("referral-subtitle");
+const referralLinkBox = document.getElementById("referral-link-box");
+const referralInvited = document.getElementById("referral-invited");
+const referralRewarded = document.getElementById("referral-rewarded");
+const referralCopyBtn = document.getElementById("referral-copy-btn");
+
+referralBtn.addEventListener("click", () => {
+  if (!accountData?.referral_link) return;
+
+  referralSubtitle.textContent =
+    `За каждого друга, который оформит подписку, тебе начислится +${accountData.referral_bonus_days} дней подписки`;
+  referralLinkBox.textContent = accountData.referral_link;
+  referralInvited.textContent = accountData.referral_invited ?? 0;
+  referralRewarded.textContent = accountData.referral_rewarded ?? 0;
+
+  showScreen("referral");
+});
+
+referralCopyBtn.addEventListener("click", () => {
+  if (!accountData?.referral_link) return;
+  navigator.clipboard?.writeText(accountData.referral_link).then(() => {
+    tg?.HapticFeedback?.notificationOccurred?.("success");
+    const span = referralCopyBtn.querySelector("span");
+    const original = span.textContent;
+    span.textContent = "Скопировано";
+    setTimeout(() => { span.textContent = original; }, 1500);
+  });
+});
+
+document.getElementById("referral-back-btn").addEventListener("click", () => showScreen("picker"));
 
 // ==== Старт ====
 showScreen("picker");
