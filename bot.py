@@ -25,6 +25,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from odds_api import fetch_odds
+import manual_odds
 from combo_builder import build_combo
 from express_image import render_express_image
 import stats
@@ -59,6 +60,9 @@ class ExpressFlow(StatesGroup):
 class BroadcastFlow(StatesGroup):
     waiting_text = State()
     confirming = State()
+
+class ImportOddsFlow(StatesGroup):
+    waiting_data = State()
 
 DEFAULT_HOURS_WINDOW = 24
 
@@ -196,6 +200,80 @@ async def referral_command(message: Message):
     await message.answer(text, reply_markup=after_express_keyboard())
 
 
+@dp.message(F.text == "/import_odds")
+async def import_odds_start(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await message.answer(
+        "Пришли список исходов текстом, одна строка — один исход.\n\n"
+        "Формат: Спорт; Матч; Исход; Коэффициент; Время (необязательно, YYYY-MM-DD HH:MM)\n\n"
+        "Пример:\n"
+        "Футбол; Реал Мадрид - Барселона; П1; 1.85; 2026-07-15 20:00\n"
+        "Футбол; Реал Мадрид - Барселона; Тотал Меньше 2.5; 1.9; 2026-07-15 20:00\n"
+        "Баскетбол; Лейкерс - Уорриорз; П1; 1.75\n\n"
+        "Несколько строк с одинаковым матчем объединятся в одно событие "
+        "с несколькими исходами. Или /cancel для отмены."
+    )
+    await state.set_state(ImportOddsFlow.waiting_data)
+
+
+@dp.message(ImportOddsFlow.waiting_data, F.text == "/cancel")
+async def import_odds_cancel(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Импорт отменён.")
+
+
+@dp.message(ImportOddsFlow.waiting_data)
+async def import_odds_receive(message: Message, state: FSMContext):
+    await state.clear()
+    result = manual_odds.set_from_text(message.text)
+
+    lines = [
+        f"✅ Загружено: {result['events_count']} событий, {result['outcomes_count']} исходов."
+    ]
+    if result["errors"]:
+        lines.append(f"\n⚠️ Не распознано строк: {len(result['errors'])}")
+        for err in result["errors"][:10]:
+            lines.append(f"  {err}")
+        if len(result["errors"]) > 10:
+            lines.append(f"  ...и ещё {len(result['errors']) - 10}")
+
+    lines.append(
+        "\nБот теперь собирает экспрессы только из этих данных. "
+        "Команда /clear_odds — очистить."
+    )
+    await message.answer("\n".join(lines))
+
+
+@dp.message(F.text == "/clear_odds")
+async def clear_odds(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    manual_odds.clear()
+    await message.answer(
+        "Ручной пул очищен. Данных больше нет — используй /import_odds, "
+        "чтобы загрузить новый список."
+    )
+
+
+@dp.message(F.text == "/odds_status")
+async def odds_status(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    st = manual_odds.status()
+    if st["events_count"] == 0:
+        await message.answer("Данных пока нет. Используй /import_odds, чтобы загрузить список.")
+        return
+    updated = st["updated_at"].strftime("%d.%m.%Y %H:%M") if st["updated_at"] else "?"
+    await message.answer(
+        f"Загруженные данные:\n"
+        f"События: {st['events_count']}\n"
+        f"Исходы: {st['outcomes_count']}\n"
+        f"Загружено: {updated} UTC\n\n"
+        f"/clear_odds — очистить, /import_odds — загрузить заново"
+    )
+
+
 def subscribe_keyboard(pay_url: str, invoice_id: int):
     kb = InlineKeyboardBuilder()
     kb.button(text="💳 Оплатить", url=pay_url)
@@ -287,18 +365,16 @@ def after_express_keyboard():
 
 
 async def build_and_send_express(message: Message, target_odds: float, user_id: int):
-    await message.answer("Собираю пресс, пока вам мацают шляпу на яхте...")
-
-    try:
-        events = await fetch_odds(hours_window=DEFAULT_HOURS_WINDOW)
-    except Exception as e:
-        logging.exception("Ошибка получения коэффициентов")
+    if not manual_odds.has_manual_data():
         await message.answer(
-            "Не удалось получить данные по коэффициентам. Проверь ODDS_API_KEY "
-            "и лимиты запросов на the-odds-api.com.",
+            "Сейчас нет загруженных данных по коэффициентам. "
+            "Попробуй чуть позже.",
             reply_markup=after_express_keyboard(),
         )
         return
+
+    await message.answer("Собираю пресс, пока вам мацают шляпу на яхте...")
+    events = manual_odds.get_events()
 
     if not events:
         await message.answer(

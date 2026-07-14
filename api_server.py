@@ -24,6 +24,12 @@ from aiohttp import web
 import stats
 from odds_api import fetch_odds
 from combo_builder import build_combo
+import manual_odds
+import crypto_pay
+
+SUBSCRIPTION_DAYS = 30
+SUBSCRIPTION_PRICE = 5
+SUBSCRIPTION_ASSET = "USDT"
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
@@ -123,6 +129,9 @@ async def handle_account(request: web.Request) -> web.Response:
         "referral_bonus_days": REFERRAL_BONUS_DAYS,
         "referral_invited": ref_stats["total_invited"],
         "referral_rewarded": ref_stats["rewarded_count"],
+        "is_admin": user_id == ADMIN_ID,
+        "username": user.get("username"),
+        "first_name": user.get("first_name"),
     })
 
 
@@ -147,10 +156,10 @@ async def handle_express(request: web.Request) -> web.Response:
     if not stats.access_allowed(user_id, ADMIN_ID, FREE_TRIAL_EXPRESSES):
         return _cors_response({"ok": False, "error": "subscription_required"}, status=402)
 
-    try:
-        events = await fetch_odds(hours_window=DEFAULT_HOURS_WINDOW)
-    except Exception as e:
-        return _cors_response({"ok": False, "error": f"odds_fetch_failed: {e}"}, status=502)
+    if not manual_odds.has_manual_data():
+        return _cors_response({"ok": False, "error": "no_events"}, status=404)
+
+    events = manual_odds.get_events()
 
     if not events:
         return _cors_response({"ok": False, "error": "no_events"}, status=404)
@@ -173,12 +182,144 @@ async def handle_express(request: web.Request) -> web.Response:
     })
 
 
+async def _authenticate(request: web.Request):
+    """Общая проверка initData для всех защищённых эндпоинтов.
+    Возвращает (user_dict, None) при успехе, либо (None, error_response)."""
+    try:
+        body = await request.json()
+    except Exception:
+        return None, _cors_response({"ok": False, "error": "bad_request"}, status=400)
+
+    user = _validate_init_data(body.get("initData", ""))
+    if not user:
+        return None, _cors_response({"ok": False, "error": "unauthorized"}, status=401)
+
+    stats.track_user(user["id"], user.get("username"))
+    return user, body
+
+
+async def handle_history(request: web.Request) -> web.Response:
+    user, body_or_err = await _authenticate(request)
+    if not user:
+        return body_or_err
+
+    history = stats.get_user_express_history(user["id"], limit=15)
+    items = [
+        {
+            "created_at": h["created_at"],
+            "target_odds": h["target_odds"],
+            "total_odds": h["total_odds"],
+            "legs_count": len(h["combo"]),
+        }
+        for h in history
+    ]
+    return _cors_response({"ok": True, "items": items})
+
+
+async def handle_subscribe(request: web.Request) -> web.Response:
+    user, body_or_err = await _authenticate(request)
+    if not user:
+        return body_or_err
+
+    user_id = user["id"]
+
+    if stats.is_subscribed(user_id):
+        expiry = stats.get_subscription_expiry(user_id)
+        return _cors_response({
+            "ok": True,
+            "already_subscribed": True,
+            "expires_at": expiry.isoformat() if expiry else None,
+        })
+
+    try:
+        invoice = await crypto_pay.create_invoice(
+            amount=SUBSCRIPTION_PRICE,
+            asset=SUBSCRIPTION_ASSET,
+            description=f"Подписка на {SUBSCRIPTION_DAYS} дней — SLURP",
+            payload=str(user_id),
+        )
+    except Exception as e:
+        return _cors_response({"ok": False, "error": f"invoice_failed: {e}"}, status=502)
+
+    return _cors_response({
+        "ok": True,
+        "already_subscribed": False,
+        "pay_url": invoice["pay_url"],
+        "invoice_id": invoice["invoice_id"],
+        "price": SUBSCRIPTION_PRICE,
+        "asset": SUBSCRIPTION_ASSET,
+        "days": SUBSCRIPTION_DAYS,
+    })
+
+
+async def handle_check_payment(request: web.Request) -> web.Response:
+    user, body_or_err = await _authenticate(request)
+    if not user:
+        return body_or_err
+
+    body = body_or_err
+    invoice_id = body.get("invoice_id")
+    if not invoice_id:
+        return _cors_response({"ok": False, "error": "missing_invoice_id"}, status=400)
+
+    try:
+        invoice = await crypto_pay.get_invoice(int(invoice_id))
+    except Exception as e:
+        return _cors_response({"ok": False, "error": f"check_failed: {e}"}, status=502)
+
+    if not invoice:
+        return _cors_response({"ok": False, "error": "invoice_not_found"}, status=404)
+
+    if invoice["status"] != "paid":
+        return _cors_response({"ok": True, "paid": False})
+
+    payer_id = int(invoice["payload"])
+    new_expiry = stats.extend_subscription(payer_id, SUBSCRIPTION_DAYS)
+
+    referrer_id = stats.reward_referrer_if_needed(payer_id, REFERRAL_BONUS_DAYS)
+
+    return _cors_response({
+        "ok": True,
+        "paid": True,
+        "expires_at": new_expiry.isoformat(),
+        "referrer_rewarded": referrer_id is not None,
+    })
+
+
+async def handle_admin_stats(request: web.Request) -> web.Response:
+    user, body_or_err = await _authenticate(request)
+    if not user:
+        return body_or_err
+
+    if user["id"] != ADMIN_ID:
+        return _cors_response({"ok": False, "error": "forbidden"}, status=403)
+
+    data = stats.get_stats()
+    top_users = [
+        {"username": u, "user_id": uid, "count": c}
+        for u, uid, c in data["top_users"]
+    ]
+
+    return _cors_response({
+        "ok": True,
+        "total_users": data["total_users"],
+        "active_today": data["active_today"],
+        "active_week": data["active_week"],
+        "total_express": data["total_express"],
+        "top_users": top_users,
+    })
+
+
 def create_app() -> web.Application:
     app = web.Application()
     app.router.add_route("OPTIONS", "/{tail:.*}", handle_options)
     app.router.add_get("/api/health", handle_health)
     app.router.add_post("/api/account", handle_account)
     app.router.add_post("/api/express", handle_express)
+    app.router.add_post("/api/history", handle_history)
+    app.router.add_post("/api/subscribe", handle_subscribe)
+    app.router.add_post("/api/check_payment", handle_check_payment)
+    app.router.add_post("/api/admin_stats", handle_admin_stats)
     return app
 
 

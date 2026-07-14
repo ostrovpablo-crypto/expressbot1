@@ -49,7 +49,36 @@ MARKET_LABELS = {
     "moneyline": "Победа",
     "spread": "Фора",
     "total": "Тотал",
+    "set_handicap": "Фора по сету",
+    "match_handicap": "Фора по матчу",
+    "1st_set_total_games": "Тотал геймов в 1-м сете",
+    "2nd_set_total_games": "Тотал геймов в 2-м сете",
+    "total_games": "Тотал геймов",
+    "total_sets": "Тотал сетов",
+    "correct_score": "Точный счёт",
+    "set_betting": "Победитель по сетам",
 }
+
+
+def _prettify_market_type(market_type: str) -> str:
+    """Если рынка нет в словаре — превращаем snake_case в читаемый вид,
+    а не показываем сырой технический идентификатор как есть."""
+    if not market_type:
+        return "Ставка"
+    label = MARKET_LABELS.get(market_type)
+    if label:
+        return label
+    return market_type.replace("_", " ").capitalize()
+
+
+def _extract_line_value(row: Dict):
+    """SharpAPI может отдавать числовую линию (тотал/фору) в разных полях
+    в зависимости от типа рынка — пробуем несколько распространённых имён."""
+    for key in ("line", "handicap", "point", "total_line", "spread_line", "games_line"):
+        value = row.get(key)
+        if value is not None:
+            return value
+    return None
 
 
 async def _get(session: aiohttp.ClientSession, path: str, params: dict):
@@ -114,6 +143,7 @@ async def _fetch_all_odds_rows(session: aiohttp.ClientSession) -> List[Dict]:
 
 def _group_rows_into_events(rows: List[Dict]) -> List[Dict]:
     events_map = {}
+    logged_market_types = set()
 
     for row in rows:
         if row.get("is_live"):
@@ -138,9 +168,20 @@ def _group_rows_into_events(rows: List[Dict]) -> List[Dict]:
                 "outcomes": [],
             }
 
-        label = MARKET_LABELS.get(market_type, market_type or "Ставка")
+        label = _prettify_market_type(market_type)
+        line_value = _extract_line_value(row)
+
+        if market_type not in ("moneyline",) and market_type not in logged_market_types:
+            logged_market_types.add(market_type)
+            print(f"[sharpapi] диагностика структуры для рынка '{market_type}': {row}")
+
+        if line_value is not None:
+            selection_text = f"{selection} {line_value}"
+        else:
+            selection_text = selection
+
         events_map[key]["outcomes"].append({
-            "name": f"{label}: {selection}",
+            "name": f"{label}: {selection_text}",
             "odds": odds_decimal,
         })
 
