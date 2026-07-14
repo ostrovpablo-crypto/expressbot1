@@ -1,103 +1,199 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Express Bot</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SLURP</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="bg-glow bg-glow--a"></div>
-  <div class="bg-glow bg-glow--b"></div>
-  <div class="bg-grid"></div>
+<div class="shell">
 
-  <div class="app">
+  <div class="content" id="content">
 
-    <header class="brand">
-      <span class="brand__dot"></span>
-      <span class="brand__name">EXPRESS BOT</span>
-    </header>
-
-    <main id="screen-picker" class="screen">
-      <h1 class="title">Собери экспресс</h1>
-      <p class="subtitle">Выбери целевой коэффициент — подберём реальные события под него</p>
-
-      <div class="odds-grid" id="odds-grid">
-        <button class="odds-btn" data-odds="1.5"><span>x1.5</span></button>
-        <button class="odds-btn" data-odds="2"><span>x2</span></button>
-        <button class="odds-btn" data-odds="3"><span>x3</span></button>
-        <button class="odds-btn" data-odds="5"><span>x5</span></button>
-        <button class="odds-btn" data-odds="10"><span>x10</span></button>
-        <button class="odds-btn odds-btn--custom" id="custom-btn"><span>Свой</span></button>
-      </div>
-
-      <div class="custom-input" id="custom-input" hidden>
-        <input type="number" step="0.1" min="1.01" id="custom-value" placeholder="Например 2.4" inputmode="decimal">
-        <button class="primary-btn" id="custom-submit"><span>Собрать</span></button>
-      </div>
-
-      <div class="account-line" id="account-line"></div>
-
-      <button class="link-btn" id="referral-btn" hidden>
-        <span>🔗 Пригласить друга</span>
-      </button>
-    </main>
-
-    <main id="screen-referral" class="screen" hidden>
-      <h1 class="title">Пригласить друга</h1>
-      <p class="subtitle" id="referral-subtitle"></p>
-
-      <div class="referral-link-box" id="referral-link-box"></div>
-
-      <button class="primary-btn" id="referral-copy-btn"><span>Скопировать ссылку</span></button>
-
-      <div class="referral-stats">
-        <div class="referral-stat">
-          <span class="referral-stat__value" id="referral-invited">0</span>
-          <span class="referral-stat__label">приглашено</span>
+    <!-- ===== DASHBOARD ===== -->
+    <section class="screen" data-screen="dashboard">
+      <div class="topbar">
+        <div class="who">
+          <div class="avatar" id="dash-avatar">?</div>
+          <div>
+            <div class="who__name" id="dash-name">—</div>
+            <div class="who__handle" id="dash-handle">—</div>
+          </div>
         </div>
-        <div class="referral-stat">
-          <span class="referral-stat__value" id="referral-rewarded">0</span>
-          <span class="referral-stat__label">оформили подписку</span>
+        <div class="status-dot" id="status-dot"></div>
+      </div>
+
+      <div class="card card--stats">
+        <div class="card__label">Статистика</div>
+        <div class="stats-row">
+          <div>
+            <div class="stat-value stat-value--cyan" id="stat-total">0</div>
+            <div class="stat-caption">экспрессов</div>
+          </div>
+          <div>
+            <div class="stat-value stat-value--magenta" id="stat-sub">—</div>
+            <div class="stat-caption">подписка</div>
+          </div>
         </div>
       </div>
 
-      <button class="link-btn" id="referral-back-btn">
-        <span>← Назад</span>
-      </button>
-    </main>
+      <button class="btn-primary btn-glow" id="open-express-btn">⚡ Собрать экспресс</button>
 
-    <main id="screen-loading" class="screen" hidden>
-      <div class="spinner"><div class="spinner__ring"></div></div>
-      <p class="loading-text">Собираю пресс, пока вам мацают шляпу на яхте...</p>
-    </main>
+      <div class="row-between">
+        <div class="section-title">Последние экспрессы</div>
+        <div class="link-small" id="goto-history">Все →</div>
+      </div>
+      <div class="list" id="dash-history-list"></div>
+    </section>
 
-    <main id="screen-result" class="screen" hidden>
-      <div class="result-header">
-        <span class="result-count" id="result-count"></span>
-        <span class="result-total" id="result-total"></span>
+    <!-- ===== HISTORY ===== -->
+    <section class="screen" data-screen="history" hidden>
+      <div class="page-title">История</div>
+      <div class="list" id="history-list"></div>
+    </section>
+
+    <!-- ===== REFERRAL ===== -->
+    <section class="screen" data-screen="referral" hidden>
+      <div class="page-title">Рефералы</div>
+
+      <div class="card card--ref">
+        <div class="card__label">Ваша ссылка</div>
+        <div class="ref-row">
+          <div class="ref-link" id="ref-link">—</div>
+          <button class="btn-chip" id="ref-copy-btn">Копировать</button>
+        </div>
       </div>
 
-      <div class="legs" id="legs"></div>
+      <div class="two-col">
+        <div class="mini-card">
+          <div class="mini-card__value mini-card__value--cyan" id="ref-invited">0</div>
+          <div class="mini-card__label">приглашено</div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-card__value mini-card__value--magenta" id="ref-rewarded">0</div>
+          <div class="mini-card__label">оплатили</div>
+        </div>
+      </div>
 
-      <p class="disclaimer">
-        Математическая комбинация реальных коэффициентов. Не прогноз и не гарантия исхода.
-      </p>
+      <div class="section-title">Как это работает</div>
+      <div class="list">
+        <div class="row-item">
+          <span>За каждого друга, оплатившего подписку</span>
+          <span class="row-item__accent" id="ref-bonus-days">+7 дней</span>
+        </div>
+      </div>
+    </section>
 
-      <button class="primary-btn" id="new-express-btn"><span>Новый экспресс</span></button>
-    </main>
+    <!-- ===== PROFILE ===== -->
+    <section class="screen" data-screen="profile" hidden>
+      <div class="profile-head">
+        <div class="avatar avatar--lg" id="profile-avatar">?</div>
+        <div class="profile-name" id="profile-name">—</div>
+        <div class="profile-handle" id="profile-handle">—</div>
+        <div class="badge" id="profile-badge">Без подписки</div>
+      </div>
+      <div class="list">
+        <div class="menu-item" id="menu-subscription">
+          <span>Подписка</span><span class="arrow">→</span>
+        </div>
+        <div class="menu-item" data-goto="referral">
+          <span>Реферальная программа</span><span class="arrow">→</span>
+        </div>
+        <div class="menu-item" data-goto="history">
+          <span>История экспрессов</span><span class="arrow">→</span>
+        </div>
+        <div class="menu-item" id="menu-admin" hidden>
+          <span>Админ-панель</span><span class="arrow">→</span>
+        </div>
+      </div>
+    </section>
 
-    <main id="screen-error" class="screen" hidden>
-      <p class="error-text" id="error-text"></p>
-      <button class="primary-btn" id="error-retry-btn"><span>Попробовать снова</span></button>
-    </main>
+    <!-- ===== EXPRESS (subpage) ===== -->
+    <section class="screen screen--sub" data-screen="express" hidden>
+      <div class="subheader">
+        <div class="back-btn" data-back>←</div>
+        <div class="subheader__title">Экспресс</div>
+      </div>
+
+      <div class="express-picker" id="express-picker">
+        <div class="picker-label">Целевой коэффициент</div>
+        <div class="odds-grid">
+          <button class="odds-chip" data-odds="1.5">x1.5</button>
+          <button class="odds-chip" data-odds="2">x2</button>
+          <button class="odds-chip" data-odds="3">x3</button>
+          <button class="odds-chip" data-odds="5">x5</button>
+          <button class="odds-chip" data-odds="10">x10</button>
+          <button class="odds-chip odds-chip--custom" id="odds-custom-btn">Свой</button>
+        </div>
+        <div class="custom-odds-row" id="custom-odds-row" hidden>
+          <input type="number" step="0.1" min="1.01" id="custom-odds-input" placeholder="Например 2.4" inputmode="decimal">
+          <button class="btn-chip" id="custom-odds-go">OK</button>
+        </div>
+      </div>
+
+      <div class="express-generating" id="express-generating" hidden>
+        <div class="spinner"></div>
+        <div class="muted">Подбираем события…</div>
+      </div>
+
+      <div class="express-result" id="express-result" hidden>
+        <div class="list" id="express-picks"></div>
+
+        <div class="card card--total">
+          <div>
+            <div class="mini-label">Коэффициент</div>
+            <div class="total-value" id="express-total">0.00</div>
+          </div>
+        </div>
+
+        <div class="two-btn-row">
+          <button class="btn-secondary" id="express-regenerate">Пересобрать</button>
+          <button class="btn-primary" id="express-done" style="flex:1.4;">Готово</button>
+        </div>
+      </div>
+
+      <div class="express-error" id="express-error" hidden>
+        <div class="muted" id="express-error-text"></div>
+        <button class="btn-primary" id="express-error-retry">Попробовать снова</button>
+      </div>
+    </section>
+
+    <!-- ===== SUBSCRIPTIONS (subpage) ===== -->
+    <section class="screen screen--sub" data-screen="subscription" hidden>
+      <div class="subheader">
+        <div class="back-btn" data-back>←</div>
+        <div class="subheader__title">Подписка</div>
+      </div>
+      <div id="subscription-content"></div>
+    </section>
+
+    <!-- ===== ADMIN (subpage) ===== -->
+    <section class="screen screen--sub" data-screen="admin" hidden>
+      <div class="subheader">
+        <div class="back-btn" data-back>←</div>
+        <div class="subheader__title">Админ-панель</div>
+      </div>
+      <div class="admin-grid" id="admin-grid"></div>
+      <div class="section-title">Топ пользователей</div>
+      <div class="list" id="admin-top-users"></div>
+    </section>
 
   </div>
 
-  <script src="app.js"></script>
+  <nav class="tabbar" id="tabbar">
+    <div class="tab" data-tab="dashboard"><span class="tab__dot"></span><span class="tab__label">Главная</span></div>
+    <div class="tab" data-tab="history"><span class="tab__dot"></span><span class="tab__label">История</span></div>
+    <div class="tab" data-tab="referral"><span class="tab__dot"></span><span class="tab__label">Рефералы</span></div>
+    <div class="tab" data-tab="profile"><span class="tab__dot"></span><span class="tab__label">Профиль</span></div>
+  </nav>
+
+</div>
+
+<script src="app.js"></script>
 </body>
 </html>
